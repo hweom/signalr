@@ -1,2 +1,2 @@
 # signalr
-SignalR library in Go
+SignalR library in Go.
