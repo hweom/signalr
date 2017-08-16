@@ -154,7 +154,8 @@ func (self *Client) Dispatch() error {
 	}
 }
 
-func (self *Client) CallHub(hub, method string, params ...interface{}) ([]json.RawMessage, error) {
+// Call server hub method. Dispatch() function must be running, otherwise this method will never return.
+func (self *Client) CallHub(hub, method string, params ...interface{}) (json.RawMessage, error) {
 	var request = struct {
 		Hub        string        `json:"H"`
 		Method     string        `json:"M"`
@@ -185,7 +186,7 @@ func (self *Client) CallHub(hub, method string, params ...interface{}) ([]json.R
 	} else if len(response.Error) > 0 {
 		return nil, fmt.Errorf("%s", response.Error)
 	} else {
-		return response.Data, nil
+		return response.Result, nil
 	}
 }
 
@@ -205,6 +206,10 @@ func (self *Client) Connect(scheme, host string, hubs []string) error {
 	}
 
 	return nil
+}
+
+func (self *Client) Close() {
+	self.socket.Close()
 }
 
 func NewWebsocketClient() *Client {
