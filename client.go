@@ -34,6 +34,7 @@ type Client struct {
 	// Futures for server call responses and a guarding mutex.
 	responseFutures map[string]chan *serverMessage
 	mutex           sync.Mutex
+	dispatchRunning bool
 }
 
 type serverMessage struct {
@@ -106,21 +107,52 @@ func (self *Client) routeResponse(response *serverMessage) {
 	}
 }
 
-func (self *Client) createResponseFuture(identifier string) chan *serverMessage {
-	var c = make(chan *serverMessage)
-
+func (self *Client) createResponseFuture(identifier string) (chan *serverMessage, error) {
 	self.mutex.Lock()
 	defer self.mutex.Unlock()
 
+	if !self.dispatchRunning {
+		return nil, fmt.Errorf("Dispatch is not running")
+	}
+
+	var c = make(chan *serverMessage)
 	self.responseFutures[identifier] = c
 
-	return c
+	return c, nil
+}
+
+func (self *Client) tryStartDispatch() error {
+	self.mutex.Lock()
+	defer self.mutex.Unlock()
+
+	if self.dispatchRunning {
+		return fmt.Errorf("Another Dispatch() is running")
+	}
+	self.dispatchRunning = true
+
+	return nil
+}
+
+func (self *Client) endDispatch() {
+	// Close all the waiting response futures.
+	self.mutex.Lock()
+	defer self.mutex.Unlock()
+	self.dispatchRunning = false
+	for _, c := range self.responseFutures {
+		close(c)
+	}
 }
 
 // Start dispatch loop. This function will return when error occurs. When this
 // happens, all the connections are closed and user can run Connect()
 // and Dispatch() again on the same client.
 func (self *Client) Dispatch() error {
+	if err := self.tryStartDispatch(); err != nil {
+		return err
+	}
+
+	defer self.endDispatch()
+
 	for {
 		var message serverMessage
 
@@ -175,7 +207,10 @@ func (self *Client) CallHub(hub, method string, params ...interface{}) (json.Raw
 		return nil, err
 	}
 
-	var responseChannel = self.createResponseFuture(fmt.Sprintf("%d", request.Identifier))
+	responseChannel, err := self.createResponseFuture(fmt.Sprintf("%d", request.Identifier))
+	if err != nil {
+		return nil, err
+	}
 
 	if err := self.socket.WriteMessage(websocket.TextMessage, data); err != nil {
 		return nil, err
