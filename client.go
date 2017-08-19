@@ -121,6 +121,13 @@ func (self *Client) createResponseFuture(identifier string) (chan *serverMessage
 	return c, nil
 }
 
+func (self *Client) deleteResponseFuture(identifier string) {
+	self.mutex.Lock()
+	defer self.mutex.Unlock()
+
+	delete(self.responseFutures, identifier)
+}
+
 func (self *Client) tryStartDispatch() error {
 	self.mutex.Lock()
 	defer self.mutex.Unlock()
@@ -141,6 +148,7 @@ func (self *Client) endDispatch() {
 	for _, c := range self.responseFutures {
 		close(c)
 	}
+	self.responseFutures = make(map[string]chan *serverMessage)
 }
 
 // Start dispatch loop. This function will return when error occurs. When this
@@ -207,7 +215,8 @@ func (self *Client) CallHub(hub, method string, params ...interface{}) (json.Raw
 		return nil, err
 	}
 
-	responseChannel, err := self.createResponseFuture(fmt.Sprintf("%d", request.Identifier))
+	var responseKey = fmt.Sprintf("%d", request.Identifier)
+	responseChannel, err := self.createResponseFuture(responseKey)
 	if err != nil {
 		return nil, err
 	}
@@ -215,6 +224,8 @@ func (self *Client) CallHub(hub, method string, params ...interface{}) (json.Raw
 	if err := self.socket.WriteMessage(websocket.TextMessage, data); err != nil {
 		return nil, err
 	}
+
+	defer self.deleteResponseFuture(responseKey)
 
 	if response, ok := <-responseChannel; !ok {
 		return nil, fmt.Errorf("Call to server returned no result")
