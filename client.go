@@ -27,9 +27,11 @@ type negotiationResponse struct {
 type Client struct {
 	OnMessageError func(err error)
 	OnClientMethod func(hub, method string, arguments []json.RawMessage)
-	params         negotiationResponse
-	socket         *websocket.Conn
-	nextId         int
+	// When client disconnects, the causing error is sent to this channel. Valid only after Connect().
+	DisconnectedChannel chan bool
+	params              negotiationResponse
+	socket              *websocket.Conn
+	nextId              int
 
 	// Futures for server call responses and a guarding mutex.
 	responseFutures map[string]chan *serverMessage
@@ -135,6 +137,7 @@ func (self *Client) tryStartDispatch() error {
 	if self.dispatchRunning {
 		return fmt.Errorf("Another Dispatch() is running")
 	}
+	self.DisconnectedChannel = make(chan bool)
 	self.dispatchRunning = true
 
 	return nil
@@ -149,17 +152,20 @@ func (self *Client) endDispatch() {
 		close(c)
 	}
 	self.responseFutures = make(map[string]chan *serverMessage)
+	close(self.DisconnectedChannel)
 }
 
 // Start dispatch loop. This function will return when error occurs. When this
 // happens, all the connections are closed and user can run Connect()
 // and Dispatch() again on the same client.
-func (self *Client) Dispatch() error {
+func (self *Client) dispatch(connectedChannel chan bool) {
 	if err := self.tryStartDispatch(); err != nil {
-		return err
+		panic("Dispatch is already running")
 	}
 
 	defer self.endDispatch()
+
+	close(connectedChannel)
 
 	for {
 		var message serverMessage
@@ -173,7 +179,7 @@ func (self *Client) Dispatch() error {
 		_, data, err := self.socket.ReadMessage()
 		if err != nil {
 			self.socket.Close()
-			return err
+			break
 		} else if err := json.Unmarshal(data, &message); err != nil {
 			if self.OnMessageError != nil {
 				self.OnMessageError(err)
@@ -250,6 +256,10 @@ func (self *Client) Connect(scheme, host string, hubs []string) error {
 	} else {
 		self.socket = ws
 	}
+
+	var connectedChannel = make(chan bool)
+	go self.dispatch(connectedChannel)
+	<-connectedChannel
 
 	return nil
 }
