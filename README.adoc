@@ -1,0 +1,5 @@
+= signalr
+The Bot Guy <thebotguy@usa.com>
+hweom 
+
+SignalR library in Go.
