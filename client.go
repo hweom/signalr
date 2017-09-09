@@ -29,9 +29,12 @@ type Client struct {
 	OnClientMethod func(hub, method string, arguments []json.RawMessage)
 	// When client disconnects, the causing error is sent to this channel. Valid only after Connect().
 	DisconnectedChannel chan bool
-	params              negotiationResponse
-	socket              *websocket.Conn
-	nextId              int
+	// Additional header parameters to add to the negotiation HTTP request.
+	RequestHeader http.Header
+
+	params negotiationResponse
+	socket *websocket.Conn
+	nextId int
 
 	// Futures for server call responses and a guarding mutex.
 	responseFutures map[string]chan *serverMessage
@@ -47,30 +50,7 @@ type serverMessage struct {
 	Error      string            `json:"E"`
 }
 
-func negotiate(scheme, address string) (negotiationResponse, error) {
-	var response negotiationResponse
-
-	var negotiationUrl = url.URL{Scheme: scheme, Host: address, Path: "/signalr/negotiate"}
-
-	client := &http.Client{}
-
-	reply, err := client.Get(negotiationUrl.String())
-	if err != nil {
-		return response, err
-	}
-
-	defer reply.Body.Close()
-
-	if body, err := ioutil.ReadAll(reply.Body); err != nil {
-		return response, err
-	} else if err := json.Unmarshal(body, &response); err != nil {
-		return response, err
-	} else {
-		return response, nil
-	}
-}
-
-func connectWebsocket(address string, params negotiationResponse, hubs []string) (*websocket.Conn, error) {
+func (self *Client) connectWebsocket(address string, params negotiationResponse, hubs []string) (*websocket.Conn, error) {
 	var connectionData = make([]struct {
 		Name string `json:"Name"`
 	}, len(hubs))
@@ -91,10 +71,40 @@ func connectWebsocket(address string, params negotiationResponse, hubs []string)
 	var connectionUrl = url.URL{Scheme: "wss", Host: address, Path: "signalr/connect"}
 	connectionUrl.RawQuery = connectionParameters.Encode()
 
-	if conn, _, err := websocket.DefaultDialer.Dial(connectionUrl.String(), nil); err != nil {
+	if conn, _, err := websocket.DefaultDialer.Dial(connectionUrl.String(), self.RequestHeader); err != nil {
 		return nil, err
 	} else {
 		return conn, nil
+	}
+}
+
+func (self *Client) negotiate(scheme, address string) (negotiationResponse, error) {
+	var response negotiationResponse
+
+	var negotiationUrl = url.URL{Scheme: scheme, Host: address, Path: "/signalr/negotiate"}
+
+	client := &http.Client{}
+
+	request, err := http.NewRequest("GET", negotiationUrl.String(), nil)
+	for k, values := range self.RequestHeader {
+		for _, val := range values {
+			request.Header.Add(k, val)
+		}
+	}
+
+	reply, err := client.Do(request)
+	if err != nil {
+		return response, err
+	}
+
+	defer reply.Body.Close()
+
+	if body, err := ioutil.ReadAll(reply.Body); err != nil {
+		return response, err
+	} else if err := json.Unmarshal(body, &response); err != nil {
+		return response, fmt.Errorf("Failed to parse message '%s': %s", string(body), err.Error())
+	} else {
+		return response, nil
 	}
 }
 
@@ -244,14 +254,14 @@ func (self *Client) CallHub(hub, method string, params ...interface{}) (json.Raw
 
 func (self *Client) Connect(scheme, host string, hubs []string) error {
 	// Negotiate parameters.
-	if params, err := negotiate(scheme, host); err != nil {
+	if params, err := self.negotiate(scheme, host); err != nil {
 		return err
 	} else {
 		self.params = params
 	}
 
 	// Connect Websocket.
-	if ws, err := connectWebsocket(host, self.params, hubs); err != nil {
+	if ws, err := self.connectWebsocket(host, self.params, hubs); err != nil {
 		return err
 	} else {
 		self.socket = ws
@@ -270,6 +280,7 @@ func (self *Client) Close() {
 
 func NewWebsocketClient() *Client {
 	return &Client{
+		RequestHeader:   http.Header{},
 		nextId:          1,
 		responseFutures: make(map[string]chan *serverMessage),
 	}
