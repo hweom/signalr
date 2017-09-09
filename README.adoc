@@ -1,5 +1,5 @@
 = SignalR Golang Wrapper
-The Bot Guy <thebotguy@usa.com>
+The Bot Guy <thebotguy@protonmail.com>
 hweom
 
 This library allows to connect to a server using SignalR protocol.
