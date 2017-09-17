@@ -1,0 +1,55 @@
+= SignalR Golang Wrapper
+The Bot Guy <thebotguy@protonmail.com>
+hweom
+
+This library allows to connect to a server using SignalR protocol.
+
+== Getting the package
+`go get` the package:
+[source, bash]
+----
+$ go get github.com/thebotguys/signalr
+----
+Then import it in your code:
+[source, go]
+----
+import "github.com/thebotguys/signalr"
+----
+
+== Usage
+First of all create a client:
+[source, go]
+----
+client := signalr.NewWebsocketClient()
+----
+Assign some functions:
+[source, go]
+----
+client.OnClientMethod = func(hub, method string, arguments []json.RawMessage) {
+    fmt.Println("Message Received: ")
+    fmt.Println("HUB: ", hub)
+    fmt.Println("METHOD: ", method)
+    fmt.Println("ARGUMENTS: ", arguments)
+}
+client.OnErrorMethod = func (err error) {
+   fmt.Println("ERROR OCCURRED: ", err)
+}
+----
+Then connect it:
+[source, go]
+----
+client.Connect("https", "destinationurl.com", []string{"hub1", "hub2"}) //and so forth
+----
+If you want to send messages to the server, use `CallHub` function:
+[source, go]
+----
+client.CallHub("hub1", "GET", "params", 1, 1.4, "every type is accepted")
+----
+When you are done, just close the client's websocket:
+[source, go]
+----
+client.Close()
+----
+
+=== Known issues
+Calling `CallHub` without connecting a client will result in an infinite wait.
